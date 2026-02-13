@@ -13,13 +13,26 @@ A native REST + WebSocket API for [signal-cli](https://github.com/AsamK/signal-c
 
 ## Quick start
 
-### 1. Install signal-cli and register
+### 1. Install signal-cli and link your phone
 
 ```bash
-brew install signal-cli   # or your package manager
+brew install signal-cli          # or your package manager
+brew install qrencode            # to display QR code in terminal
+```
 
-signal-cli -u +1234567890 register
-signal-cli -u +1234567890 verify 123-456
+Link signal-cli to your existing Signal account (keeps your phone working):
+
+```bash
+signal-cli link -n "my-server" | tee >(xargs -L 1 qrencode -t utf8)
+```
+
+This prints a QR code in your terminal. Scan it with your phone:
+**Signal app > Settings > Linked Devices > Link New Device**.
+
+Wait for the process to exit — linking is complete. Then sync your contacts:
+
+```bash
+signal-cli -u +1234567890 receive
 ```
 
 ### 2. Run
