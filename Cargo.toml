@@ -3,6 +3,11 @@ name = "signal-cli-api"
 version = "0.1.0"
 edition = "2021"
 description = "Native REST + WebSocket API bridge for signal-cli"
+license = "MIT"
+repository = "https://github.com/h4x0r/signal-cli-api"
+readme = "README.md"
+keywords = ["signal", "signal-cli", "rest-api", "websocket", "bot"]
+categories = ["command-line-utilities", "web-programming::http-server"]
 
 [dependencies]
 anyhow = "1"
