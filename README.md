@@ -13,7 +13,13 @@ A native REST + WebSocket API for [signal-cli](https://github.com/AsamK/signal-c
 
 ## Quick start
 
-### 1. Install signal-cli and link your phone
+### 1. Install
+
+```bash
+cargo install signal-cli-api
+```
+
+### 2. Set up signal-cli and link your phone
 
 ```bash
 brew install signal-cli          # or your package manager
@@ -35,7 +41,7 @@ Wait for the process to exit — linking is complete. Then sync your contacts:
 signal-cli -u +1234567890 receive
 ```
 
-### 2. Run
+### 3. Run
 
 ```bash
 signal-cli-api
