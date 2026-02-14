@@ -3,16 +3,32 @@ use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
 
 /// A managed signal-cli daemon child process.
-/// Kills the child on drop.
+/// Kills the entire process group on drop.
 pub struct ManagedDaemon {
     child: Child,
+    pid: i32,
     pub addr: String,
 }
 
 impl Drop for ManagedDaemon {
     fn drop(&mut self) {
-        // Best-effort kill — the process may already be dead.
-        let _ = self.child.start_kill();
+        kill_process_group(self.pid);
+        let _ = self.child.start_kill(); // belt and braces
+    }
+}
+
+/// Kill an entire process group: SIGTERM first, then SIGKILL after 2s.
+/// Public so integration tests can call it directly.
+pub fn kill_process_group(pid: i32) {
+    // Send SIGTERM to the process group (negative PID = group)
+    unsafe {
+        libc::kill(-pid, libc::SIGTERM);
+    }
+    // Give processes time to exit gracefully
+    std::thread::sleep(Duration::from_secs(2));
+    // Escalate to SIGKILL for anything still alive
+    unsafe {
+        libc::kill(-pid, libc::SIGKILL);
     }
 }
 
@@ -31,6 +47,8 @@ fn find_signal_cli() -> anyhow::Result<String> {
 }
 
 /// Spawn signal-cli daemon on a random available port and wait until it's ready.
+/// The child is placed in its own process group via setsid() so that
+/// dropping ManagedDaemon kills the entire tree (including Java grandchildren).
 pub async fn spawn() -> anyhow::Result<ManagedDaemon> {
     let bin = find_signal_cli()?;
     tracing::info!("Found signal-cli at {bin}");
@@ -43,12 +61,26 @@ pub async fn spawn() -> anyhow::Result<ManagedDaemon> {
     let addr = format!("127.0.0.1:{port}");
 
     tracing::info!("Spawning signal-cli daemon on {addr}");
-    let mut child = Command::new(&bin)
-        .args(["daemon", "--tcp", &addr])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()?;
+    // SAFETY: pre_exec runs in the forked child before exec. setsid() is
+    // async-signal-safe and creates a new session/process group, which lets
+    // us kill the entire group (including Java grandchildren) on shutdown.
+    let mut child = unsafe {
+        Command::new(&bin)
+            .args(["daemon", "--tcp", &addr])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .pre_exec(|| {
+                let ret = libc::setsid();
+                if ret == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            })
+            .spawn()?
+    };
+
+    let pid = child.id().expect("child should have a PID") as i32;
 
     // Poll until the port is accepting connections (max ~30s — JVM startup is slow).
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
@@ -87,5 +119,5 @@ pub async fn spawn() -> anyhow::Result<ManagedDaemon> {
     }
     tracing::info!("signal-cli daemon ready on {addr}");
 
-    Ok(ManagedDaemon { child, addr })
+    Ok(ManagedDaemon { child, pid, addr })
 }

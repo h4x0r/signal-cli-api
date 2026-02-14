@@ -94,9 +94,13 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
             tracing::info!("Listening on https://{addr} (TLS)");
-            axum_server::bind_rustls(addr, tls_config)
-                .serve(app.into_make_service())
-                .await?;
+            tokio::select! {
+                result = axum_server::bind_rustls(addr, tls_config)
+                    .serve(app.into_make_service()) => { result?; }
+                _ = shutdown_signal() => {
+                    tracing::info!("Shutdown signal received, stopping...");
+                }
+            }
         }
         (None, None) => {
             let listener = match tokio::net::TcpListener::bind(requested).await {
@@ -113,12 +117,30 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
             tracing::info!("Listening on http://{}", listener.local_addr()?);
-            axum::serve(listener, app).await?;
+            tokio::select! {
+                result = axum::serve(listener, app) => { result?; }
+                _ = shutdown_signal() => {
+                    tracing::info!("Shutdown signal received, stopping...");
+                }
+            }
         }
         _ => {
             anyhow::bail!("Both --tls-cert and --tls-key must be provided together");
         }
     }
 
+    // _managed_daemon drops here → process group killed
     Ok(())
+}
+
+/// Wait for SIGTERM or Ctrl+C, whichever comes first.
+async fn shutdown_signal() {
+    let ctrl_c = tokio::signal::ctrl_c();
+    let mut sigterm =
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to register SIGTERM handler");
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = sigterm.recv() => {}
+    }
 }
