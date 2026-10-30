@@ -36,7 +36,34 @@ async fn start_mock_signal_cli() -> SocketAddr {
                         || params
                             .and_then(|p| p.get("number"))
                             .and_then(|a| a.as_str())
-                            == Some("+ERROR");
+                            == Some("+ERROR")
+                        // finishLink has no account/number param; trigger its error path via the link URI
+                        || params
+                            .and_then(|p| p.get("deviceLinkUri"))
+                            .and_then(|a| a.as_str())
+                            == Some("sgnl://linkdevice?uuid=ERROR");
+                    // Real signal-cli's finishLink accepts only deviceLinkUri +
+                    // deviceName and rejects anything else (e.g. `account`).
+                    let bad_finish_link = method == "finishLink"
+                        && params
+                            .and_then(|p| p.as_object())
+                            .map(|o| {
+                                !o.contains_key("deviceLinkUri")
+                                    || o.keys().any(|k| k != "deviceLinkUri" && k != "deviceName")
+                            })
+                            .unwrap_or(true);
+                    if bad_finish_link {
+                        let response = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "error": {"code": -32600, "message": "Unrecognized field in finishLink params"},
+                            "id": id
+                        });
+                        let mut resp_line = serde_json::to_string(&response).unwrap();
+                        resp_line.push('\n');
+                        let _ = writer.write_all(resp_line.as_bytes()).await;
+                        let _ = writer.flush().await;
+                        continue;
+                    }
                     if is_error {
                         let response = serde_json::json!({
                             "jsonrpc": "2.0",
@@ -3713,7 +3740,7 @@ async fn test_contacts_update_rpc_error() {
 #[tokio::test]
 async fn test_devices_link_rpc_error() {
     let base = setup().await;
-    assert_json_request(&base, "POST", "/v1/devices/+ERROR", serde_json::json!({"uri": "sgnl://linkdevice?uuid=test"}), 400).await;
+    assert_json_request(&base, "POST", "/v1/devices/+123", serde_json::json!({"uri": "sgnl://linkdevice?uuid=ERROR"}), 400).await;
 }
 
 #[tokio::test]

@@ -69,12 +69,19 @@ struct LinkDeviceBody {
     device_name: Option<String>,
 }
 
+/// POST /v1/devices/{number} — complete a link started by /v1/qrcodelink.
+///
+/// signal-cli's `finishLink` takes `deviceLinkUri` and `deviceName` only; it
+/// has no `account` (the account does not exist until the link completes -
+/// the new account's number comes back in the result) and rejects unknown
+/// fields. The `{number}` path segment is kept for API compatibility but is
+/// not forwarded.
 async fn link_device(
-    Path(number): Path<String>,
+    Path(_number): Path<String>,
     State(st): State<AppState>,
     Json(body): Json<LinkDeviceBody>,
 ) -> Response {
-    let mut params = json!({ "account": number, "uri": body.uri });
+    let mut params = json!({ "deviceLinkUri": body.uri });
     if let Some(name) = body.device_name {
         params["deviceName"] = json!(name);
     }
