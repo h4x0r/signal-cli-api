@@ -37,6 +37,24 @@ async fn start_mock_signal_cli() -> SocketAddr {
                             .and_then(|p| p.get("number"))
                             .and_then(|a| a.as_str())
                             == Some("+ERROR");
+                    // Real signal-cli: with several accounts registered,
+                    // getAttachment fails unless `account` is supplied.
+                    let needs_account = method == "getAttachment"
+                        && params.and_then(|p| p.get("id")).and_then(|v| v.as_str())
+                            == Some("needs-account")
+                        && params.and_then(|p| p.get("account")).is_none();
+                    if needs_account {
+                        let response = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "error": {"code": -32602, "message": "Method requires valid account parameter"},
+                            "id": id
+                        });
+                        let mut resp_line = serde_json::to_string(&response).unwrap();
+                        resp_line.push('\n');
+                        let _ = writer.write_all(resp_line.as_bytes()).await;
+                        let _ = writer.flush().await;
+                        continue;
+                    }
                     if is_error {
                         let response = serde_json::json!({
                             "jsonrpc": "2.0",
@@ -4138,4 +4156,14 @@ async fn test_sse_content_type() {
     assert_eq!(res.status(), 200);
     let ct = res.headers().get("content-type").unwrap().to_str().unwrap();
     assert!(ct.contains("text/event-stream"), "SSE should have text/event-stream content type, got {ct}");
+}
+
+#[tokio::test]
+async fn test_attachments_get_account_query_selects_account() {
+    // Mirrors signal-cli with several accounts registered: without `account`
+    // the call is rejected, with ?account= it goes through.
+    let base = setup().await;
+    assert_get(&base, "/v1/attachments/needs-account", 400).await;
+    let body = assert_get(&base, "/v1/attachments/needs-account?account=%2B123", 200).await.unwrap();
+    assert_eq!(body["id"], "att1");
 }
